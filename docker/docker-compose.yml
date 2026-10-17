@@ -1,0 +1,17 @@
+# Run from the docker/ folder:  docker compose up --build
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: ahmdooz/prodml-api:0.1.0
+    container_name: prodml-api
+    ports:
+      - "8000:8000"
+    environment:
+      - LOG_LEVEL=INFO
+      - MODELS_DIR=/app/models
+      - SERVING_FORMAT=onnx
+    volumes:
+      - ../models:/app/models:ro   # swap the model without rebuilding the image
+    restart: unless-stopped
