@@ -1,0 +1,14 @@
+{
+  "model_version": "0.1.0",
+  "trained_at": "2026-10-16T19:43:03.745332+00:00",
+  "framework": "scikit-learn LinearRegression",
+  "feature_names": [
+    "PU_DO",
+    "trip_distance"
+  ],
+  "n_vectorizer_features": 20122,
+  "n_train_rows": 346033,
+  "n_val_rows": 86509,
+  "val_mae": 3.8392,
+  "val_rmse": 5.7529
+}
