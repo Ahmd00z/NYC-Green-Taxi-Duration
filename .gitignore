@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Environments / secrets
+.venv/
+venv/
+.v/
+.env
+
+# Raw data (from Module 2 onward DVC handles this)
+data/*
+!data/.gitkeep
+
+# Build output
+build/
+dist/
+
+# Additional secrets
+.env.*
+!.env.example
+
+# Local artifacts
+.DS_Store
