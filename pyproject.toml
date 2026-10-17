@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prodml"
+version = "0.1.0"
+description = "NYC green taxi trip-duration model served as a production-style API"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "pandas",
+    "pyarrow",
+    "scikit-learn",
+    "skl2onnx",
+    "onnxruntime",
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "pydantic-settings",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov", "ruff", "black", "mypy", "httpx", "pre-commit"]
+
+# After `pip install -e .` you can type `prodml-train` anywhere.
+[project.scripts]
+prodml-train = "prodml.train:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The coverage gate: pytest FAILS if coverage drops below 70%.
+addopts = "--cov=src/prodml --cov-report=term-missing --cov-fail-under=70"
+
+[tool.coverage.report]
+exclude_lines = ["pragma: no cover", "if __name__ == .__main__.:"]
+
+[tool.black]
+line-length = 88
+
+[tool.ruff]
+line-length = 88
+# The baseline notebook is deliberately messy: lint only real code.
+extend-exclude = ["notebooks"]
+force-exclude = true
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
