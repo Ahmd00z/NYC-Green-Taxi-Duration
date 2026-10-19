@@ -16,8 +16,20 @@ venv/
 .env
 
 # Raw data (from Module 2 onward DVC handles this)
+# Git ignores the data itself, but MUST keep the small *.dvc pointer files.
 data/*
 !data/.gitkeep
+!data/*.dvc
+!data/.gitignore
+
+# Module 2: pipeline outputs that DVC / MLflow own (never commit these)
+models/candidate/
+mlruns/
+mlflow.db
+infra/.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
 
 # Build output
 build/
