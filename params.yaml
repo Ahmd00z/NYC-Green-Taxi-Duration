@@ -1,0 +1,25 @@
+# Hyperparameters. DVC tracks the keys listed under `params:` in pipelines/dvc.yaml,
+# so changing one value here re-runs only the stages that depend on it.
+
+data:
+  train_ratio: 0.8          # chronological split: first 80% of trips train, rest validate
+
+train:
+  model: xgboost            # linear | xgboost | random_forest   (which family the DVC pipeline trains)
+  seed: 42
+
+linear: {}                  # LinearRegression has nothing to tune: it is the baseline
+
+xgboost:
+  n_estimators: 200
+  max_depth: 8
+  learning_rate: 0.1
+  subsample: 0.8
+  colsample_bytree: 0.8
+  min_child_weight: 1
+
+random_forest:
+  n_estimators: 100
+  max_depth: 14
+  min_samples_leaf: 10
+  max_features: 1.0
