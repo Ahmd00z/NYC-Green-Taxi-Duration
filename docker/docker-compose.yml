@@ -1,17 +1,67 @@
-# Run from the docker/ folder:  docker compose up --build
+# Module 2 stack:  MLflow tracking server + the API.
+#
+# No Postgres, no MinIO: MLflow keeps a SQLite file and its artifacts in one Docker
+# volume (mlflow-data) on your machine. Nothing else to configure, no .env needed.
+#
+# Run from the REPO ROOT:
+#
+#   docker compose -f docker/docker-compose.yml up -d mlflow     # tracking server only
+#   docker compose -f docker/docker-compose.yml up -d --build    # + the API (needs a Production model)
+#
+#   MLflow UI   http://localhost:5000
+#   API         http://localhost:8000/docs
+#
+# Stop:                  docker compose -f docker/docker-compose.yml down
+# Stop AND erase runs:   docker compose -f docker/docker-compose.yml down -v
+name: prodml
+
 services:
+  mlflow:
+    build:
+      context: .
+      dockerfile: mlflow.Dockerfile
+    command:
+      - mlflow
+      - server
+      - --host=0.0.0.0
+      - --port=5000
+      - --backend-store-uri=sqlite:////mlflow/mlflow.db
+      - --artifacts-destination=/mlflow/artifacts
+      # Clients (your laptop, the API container) only speak HTTP to :5000; the server
+      # reads and writes the artifact files itself.
+      - --serve-artifacts
+    volumes:
+      - mlflow-data:/mlflow
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
   api:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    image: ahmdooz/prodml-api:0.1.0
+    image: ${DOCKERHUB_USER:-ahmdooz}/prodml-api:0.2.0
     container_name: prodml-api
+    depends_on:
+      mlflow:
+        condition: service_healthy
     ports:
       - "8000:8000"
     environment:
       - LOG_LEVEL=INFO
-      - MODELS_DIR=/app/models
-      - SERVING_FORMAT=onnx
-    volumes:
-      - ../models:/app/models:ro   # swap the model without rebuilding the image
+      # The model comes from the registry (models:/<name>/Production).
+      # To serve a different model: change its stage in MLflow, then
+      #   docker compose -f docker/docker-compose.yml restart api   (no code change, no rebuild)
+      - MODEL_SOURCE=registry
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - REGISTERED_MODEL_NAME=ride-duration-predictor
+      - MODEL_STAGE=Production
     restart: unless-stopped
+
+volumes:
+  mlflow-data:
