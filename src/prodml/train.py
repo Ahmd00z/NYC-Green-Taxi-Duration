@@ -1,5 +1,6 @@
 """Training entry point:  python -m prodml.train   (or just: prodml-train)"""
 
+import argparse
 import json
 import logging
 import pickle
@@ -58,10 +59,45 @@ def train(data_path: str, models_dir: str, train_ratio: float = 0.8) -> dict:
     return metadata
 
 
+def train_tracked() -> dict:
+    """Module 2: train the family named in params.yaml as ONE tracked MLflow run.
+
+    Same data, same split, same features as every other run: only the model differs.
+    """
+    from prodml.experiments import load_splits
+    from prodml.models import make_family
+    from prodml.params import load_params
+    from prodml.tracking import configure_mlflow, log_family_run
+
+    params = load_params()
+    name = params["train"]["model"]
+    configure_mlflow()
+    train_df, val_df = load_splits(settings.data_path, params["data"]["train_ratio"])
+    result = log_family_run(
+        make_family(name, params.get(name)),
+        train_df,
+        val_df,
+        run_name=f"train-{name}",
+        data_path=settings.data_path,
+    )
+    return {"run_id": result.run_id, **result.metrics}
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Train the ride-duration model")
+    parser.add_argument(
+        "--local",
+        action="store_true",
+        help="Module 1 behaviour: LinearRegression -> models/ (pickle+ONNX), no MLflow",
+    )
+    args = parser.parse_args()
+
     setup_logging()
     logger.info("training started", extra={"data_path": settings.data_path})
-    metadata = train(settings.data_path, settings.models_dir, settings.train_ratio)
+    if args.local:
+        metadata = train(settings.data_path, settings.models_dir, settings.train_ratio)
+    else:
+        metadata = train_tracked()
     logger.info("training finished", extra=metadata)
 
 

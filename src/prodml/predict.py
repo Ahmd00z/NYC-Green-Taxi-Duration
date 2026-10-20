@@ -2,6 +2,15 @@
 
 The API, (later) BentoML, and the optimized ONNX model all sit behind this
 interface:  .load()  .predict_one()  .predict_batch()
+
+Module 2: the model comes from the MLflow REGISTRY by stage, never by file path:
+
+    models:/ride-duration-predictor/Production
+
+so promoting a new model in the registry changes what is served with zero code changes
+and zero rebuilds. The Module-1 behaviour (load models/model.pkl|onnx from disk)
+is still available as an explicit offline fallback: MODEL_SOURCE=local, or
+pass `models_dir=`.
 """
 
 import hashlib
@@ -19,18 +28,64 @@ from prodml.utils import timed
 
 
 class DurationPredictor:
-    def __init__(self, models_dir: str | None = None) -> None:
+    def __init__(
+        self, models_dir: str | None = None, source: str | None = None
+    ) -> None:
+        # Passing a directory explicitly means "local files", as in Module 1.
+        self.source = source or ("local" if models_dir else settings.model_source)
         self.models_dir = Path(models_dir or settings.models_dir)
-        self.serving_format = settings.serving_format  # "onnx" or "pickle"
+        self.serving_format = settings.serving_format  # "onnx" or "pickle" (local only)
         self.metadata: dict[str, Any] = {}
         self._dv: Any = None
         self._model: Any = None
         self._session: ort.InferenceSession | None = None
+        self._pyfunc: Any = None
         self._artifact_sha256 = ""
 
     # ---------------------------------------------------------------- loading
     def load(self) -> "DurationPredictor":
-        """Load artifacts from disk. Raises FileNotFoundError if not trained yet."""
+        """Load the model. Raises if it cannot (the API then answers 503)."""
+        if self.source == "registry":
+            self._load_registry()
+        else:
+            self._load_local()
+        return self
+
+    def _load_registry(self) -> None:
+        import mlflow
+        from mlflow.tracking import MlflowClient
+
+        mlflow.set_tracking_uri(settings.mlflow_tracking_uri)
+        name, stage = settings.registered_model_name, settings.model_stage
+        self._pyfunc = mlflow.pyfunc.load_model(f"models:/{name}/{stage}")
+
+        client = MlflowClient()
+        in_stage = [
+            v
+            for v in client.search_model_versions(f"name='{name}'")
+            if v.current_stage == stage
+        ]
+        mv = max(in_stage, key=lambda v: int(v.version))
+        run = client.get_run(mv.run_id)
+        self.metadata = {
+            "model_version": f"{name}/v{mv.version}",
+            "registry_version": int(mv.version),
+            "stage": stage,
+            "source": "registry",
+            "run_id": mv.run_id,
+            "framework": run.data.tags.get("framework"),
+            "family": run.data.tags.get("family"),
+            "git_commit": run.data.tags.get("git_commit"),
+            "data_version": run.data.tags.get("data_version"),
+            "val_mae": round(run.data.metrics.get("mae", float("nan")), 4),
+            "val_rmse": round(run.data.metrics.get("rmse", float("nan")), 4),
+        }
+        self.serving_format = "registry"
+        self._artifact_sha256 = hashlib.sha256(
+            f"{mv.run_id}:{mv.version}".encode()
+        ).hexdigest()
+
+    def _load_local(self) -> None:
         pkl_path = self.models_dir / settings.pickle_name
         with open(pkl_path, "rb") as f:
             # Only unpickle files WE produced: pickle can run arbitrary code on load.
@@ -47,7 +102,6 @@ class DurationPredictor:
         meta_path = self.models_dir / settings.metadata_name
         if meta_path.exists():
             self.metadata = json.loads(meta_path.read_text())
-        return self
 
     @property
     def version(self) -> str:
@@ -55,6 +109,10 @@ class DurationPredictor:
 
     # ------------------------------------------------------------- prediction
     def _score(self, rows: list[dict[str, Any]]) -> np.ndarray:
+        if self._pyfunc is not None:
+            import pandas as pd
+
+            return np.asarray(self._pyfunc.predict(pd.DataFrame(rows))).ravel()
         X = self._dv.transform(rows)
         if self._session is not None:
             X_dense = X.toarray().astype(np.float32)
