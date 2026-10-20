@@ -1,6 +1,9 @@
 # The image that runs the MLflow tracking server.
 # Everything is stored in ONE folder (/mlflow): a SQLite database + the artifacts.
 FROM python:3.11-slim
+ARG PIP_DEFAULT_TIMEOUT=300
+ENV PIP_DEFAULT_TIMEOUT=${PIP_DEFAULT_TIMEOUT}
+ENV PIP_RETRIES=10
 
 ARG MLFLOW_VERSION=3.17.1
 RUN pip install --no-cache-dir "mlflow==${MLFLOW_VERSION}"

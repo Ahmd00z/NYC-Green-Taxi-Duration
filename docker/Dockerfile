@@ -9,6 +9,9 @@ RUN pip install --no-cache-dir --prefix=/install .
 
 # ---- Stage 2: runtime -- only what's needed to RUN the API -----------------
 FROM python:3.11-slim AS runtime
+ARG PIP_DEFAULT_TIMEOUT=300
+ENV PIP_DEFAULT_TIMEOUT=${PIP_DEFAULT_TIMEOUT}
+ENV PIP_RETRIES=10
 ENV PYTHONUNBUFFERED=1
 RUN useradd --create-home --uid 1000 appuser
 COPY --from=builder /install /usr/local

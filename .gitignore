@@ -41,3 +41,6 @@ dist/
 
 # Local artifacts
 .DS_Store
+
+# Local MLflow artifacts
+mlartifacts/

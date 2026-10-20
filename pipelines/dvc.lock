@@ -1,0 +1,116 @@
+schema: '2.0'
+stages:
+  prepare:
+    cmd: python -m prodml.pipeline prepare
+    deps:
+    - path: data/green_tripdata_2019-08.parquet
+      hash: md5
+      md5: a6f65fd011a981a270799a69b6b76179
+      size: 7554849
+      isexec: true
+    - path: src/prodml/data.py
+      hash: md5
+      md5: d7a54e4fff5a0bbbf0d33270312cf5e9
+      size: 1329
+      isexec: true
+    - path: src/prodml/pipeline.py
+      hash: md5
+      md5: 3de4cbdeb712f01b4fbe4218e080f565
+      size: 6346
+      isexec: true
+    params:
+      params.yaml:
+        data.train_ratio: 0.8
+    outs:
+    - path: data/processed
+      hash: md5
+      md5: 8dee0a3cd5e2409efc93ff62bbac46aa.dir
+      size: 10693963
+      nfiles: 2
+  featurize:
+    cmd: python -m prodml.pipeline featurize
+    deps:
+    - path: data/processed
+      hash: md5
+      md5: 8dee0a3cd5e2409efc93ff62bbac46aa.dir
+      size: 10693963
+      nfiles: 2
+    - path: src/prodml/experiments.py
+      hash: md5
+      md5: 9462b84c5787f62ae55a1260d6659df2
+      size: 6754
+      isexec: true
+    - path: src/prodml/features.py
+      hash: md5
+      md5: 763a60109fbbfd9703b4a264a9977d67
+      size: 1499
+      isexec: true
+    outs:
+    - path: data/features
+      hash: md5
+      md5: e94b762e0f4e88c3d96cd4f253f55d91.dir
+      size: 2283781
+      nfiles: 2
+  train:
+    cmd: python -m prodml.pipeline train
+    deps:
+    - path: data/features
+      hash: md5
+      md5: e94b762e0f4e88c3d96cd4f253f55d91.dir
+      size: 2283781
+      nfiles: 2
+    - path: src/prodml/models.py
+      hash: md5
+      md5: 5913846535100a8a56654c6ed6331b29
+      size: 10471
+      isexec: true
+    - path: src/prodml/tracking.py
+      hash: md5
+      md5: 18da105e3477ed9a6d1402856e74aebc
+      size: 9006
+      isexec: true
+    params:
+      params.yaml:
+        random_forest:
+          n_estimators: 100
+          max_depth: 14
+          min_samples_leaf: 10
+          max_features: 1.0
+        train.model: xgboost
+        xgboost:
+          n_estimators: 200
+          max_depth: 8
+          learning_rate: 0.1
+          subsample: 0.8
+          colsample_bytree: 0.8
+          min_child_weight: 1
+    outs:
+    - path: metrics/train_run.json
+      hash: md5
+      md5: 4c9fe4066c6771bb7081b293a79afe0f
+      size: 73
+      isexec: true
+    - path: models/candidate
+      hash: md5
+      md5: 7f4c40172c9f05332971e2bfb739ac4e.dir
+      size: 20398450
+      nfiles: 3
+  evaluate:
+    cmd: python -m prodml.pipeline evaluate
+    deps:
+    - path: data/features/val.parquet
+      hash: md5
+      md5: e9e441170d3aada71a6984c7bc160626
+      size: 490471
+      isexec: true
+    - path: models/candidate
+      hash: md5
+      md5: 7f4c40172c9f05332971e2bfb739ac4e.dir
+      size: 20398450
+      nfiles: 3
+    outs:
+    - path: metrics/scores.json
+      hash: md5
+      md5: e582f8bea16a810ebcaeae0d45cd19c1
+      size: 53
+      isexec: true
