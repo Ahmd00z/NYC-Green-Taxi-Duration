@@ -1,6 +1,62 @@
 # NYC Green Taxi Trip-Duration Prediction — MLOps
 
-An end-to-end MLOps project that predicts NYC green taxi trip duration in minutes using a scikit-learn Linear Regression model. The project includes data processing, feature engineering, model training, ONNX export, automated testing, a FastAPI prediction service, structured logging, and Docker deployment.
+[![CI](https://github.com/Ahmd00z/NYC-Green-Taxi-Duration/actions/workflows/ci.yml/badge.svg)](https://github.com/Ahmd00z/NYC-Green-Taxi-Duration/actions/workflows/ci.yml)
+
+An end-to-end MLOps project that predicts NYC green taxi trip duration in minutes. Module 1 turned a notebook into a tested, containerized FastAPI service. **Module 2 makes every model reproducible and auditable and removes the human from the retraining loop:** experiments are tracked in MLflow (three model families), models are promoted through a registry (`None → Staging → Production`), data and pipeline are versioned with DVC, CI gates on model quality, infrastructure is Terraform code, and a continuous-training workflow retrains, compares against Production and promotes to Staging automatically.
+
+## Module 2 at a glance
+
+```text
+ raw data ──dvc──▶ prepare ─▶ featurize ─▶ train ─▶ evaluate ─▶ metrics/scores.json
+ (DVC remote:       │                        │
+  local folder)       │                        ▼
+                    │                  MLflow run  (params · metrics · plots · requirements.txt
+                    │                   tags: git_commit, data_version, author, framework)
+                    │                        │ promote_if_better()
+                    ▼                        ▼
+              data_version  ─────────▶  Model Registry:  None → Staging → (human approval) → Production
+                                                                                      │
+                                    API loads  models:/ride-duration-predictor/Production
+                                    (swap the model = change a stage, no code change, no rebuild)
+```
+
+| Piece | Where |
+|---|---|
+| MLflow server (SQLite + local volume) | `docker/docker-compose.yml` |
+| 3 model families + sweep + autolog | `src/prodml/models.py`, `tracking.py`, `experiments.py` |
+| Registry and promotion logic | `src/prodml/registry.py` |
+| Serve by stage | `src/prodml/predict.py` (`MODEL_SOURCE=registry`) |
+| DVC pipeline | `pipelines/dvc.yaml`, `params.yaml`, `src/prodml/pipeline.py`, `.dvc/config` |
+| CI (lint → test → gate → build) | `.github/workflows/ci.yml`, `src/prodml/gate.py` |
+| Continuous training | `.github/workflows/continuous-training.yml` |
+| Terraform | `infra/` |
+
+### Run the Module 2 stack
+
+```bash
+docker compose -f docker/docker-compose.yml up -d mlflow     # no passwords, no .env needed
+export MLFLOW_TRACKING_URI=http://localhost:5000     # MLflow UI: http://localhost:5000
+
+uv sync --extra dev --extra train
+uv run python -m prodml.experiments                  # 3 families + 10-trial sweep + autolog = 15 runs
+uv run python -m prodml.registry promote-if-better --run-id <best-run-id>   # -> Staging
+uv run python -m prodml.registry promote-production --version 1             # human step -> Production
+docker compose -f docker/docker-compose.yml up -d api                       # serves models:/.../Production
+```
+
+Switch the served model with **no code change and no rebuild**:
+`uv run python -m prodml.registry promote-production --version 2 && docker compose -f docker/docker-compose.yml restart api`.
+
+### Reproduce a metric
+
+```bash
+# once: dvc add data/green_tripdata_2019-08.parquet && dvc push   (storage = ../dvc-storage)
+dvc pull data/green_tripdata_2019-08.parquet.dvc
+dvc repro pipelines/dvc.yaml            # run again: every stage is skipped (cached)
+dvc metrics show                        # same MAE as the MLflow run tagged with this data_version
+```
+
+Offline / no MLflow? `MODEL_SOURCE=local` (or `python -m prodml.train --local`) keeps the Module 1 behaviour.
 
 ## Features
 
@@ -210,6 +266,11 @@ The service supports the following environment variables:
 | `MODELS_DIR` | Directory containing model artifacts |
 | `SERVING_FORMAT` | Selects `onnx` or `pickle` inference |
 | `LOG_LEVEL` | Controls logging verbosity |
+| `MODEL_SOURCE` | `registry` (default, Module 2) loads `models:/<name>/<stage>` from MLflow; `local` loads files from `MODELS_DIR` |
+| `MLFLOW_TRACKING_URI` | MLflow server (`http://localhost:5000`; inside Compose: `http://mlflow:5000`) |
+| `REGISTERED_MODEL_NAME` / `MODEL_STAGE` | Which registry model and stage to serve (`ride-duration-predictor` / `Production`) |
+| `PROMOTION_MARGIN` | Fraction by which a candidate must beat Production's MAE to reach Staging (default `0.0`) |
+| `GATE_MAX_REGRESSION` | CI fails if MAE is worse than the baseline by more than this fraction (default `0.05`) |
 
 Refer to `src/prodml/config.py` for the actual defaults and supported configuration.
 
@@ -236,12 +297,26 @@ Refer to `src/prodml/config.py` for the actual defaults and supported configurat
 │       ├── export.py
 │       ├── logging_conf.py
 │       ├── utils.py
+│       ├── models.py            # linear / xgboost / random_forest behind one interface
+│       ├── pyfunc_model.py      # the MLflow wrapper all three share
+│       ├── tracking.py          # logs a complete, reproducible MLflow run
+│       ├── experiments.py       # 3 families + Optuna sweep + autolog demo
+│       ├── registry.py          # stages, promote_if_better, CLI
+│       ├── pipeline.py          # the DVC stages
+│       ├── gate.py              # CI model-quality gate
+│       ├── params.py
 │       └── api/
 │           ├── main.py
 │           └── schemas.py
+├── params.yaml                  # hyperparameters tracked by DVC
+├── pipelines/dvc.yaml           # prepare -> featurize -> train -> evaluate
+├── .github/workflows/           # ci.yml, continuous-training.yml
+├── infra/                       # Terraform (docker provider)
+├── scripts/make_synthetic_trips.py   # offline stand-in data (smoke tests only)
 ├── tests/
 ├── docker/
 │   ├── Dockerfile
+│   ├── mlflow.Dockerfile
 │   └── docker-compose.yml
 ├── models/
 │   ├── model.pkl

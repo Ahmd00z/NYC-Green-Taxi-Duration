@@ -18,10 +18,26 @@ dependencies = [
     "uvicorn",
     "pydantic",
     "pydantic-settings",
+    # Module 2: what the SERVING image needs to load models:/<name>/Production
+    "mlflow-skinny==3.17.1",
+    # CPU-only wheel on Linux (the Docker image): ~300 MB smaller than the CUDA build
+    "xgboost-cpu; sys_platform == 'linux'",
+    "xgboost; sys_platform != 'linux'",
+    "pyyaml",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-cov", "ruff", "black", "mypy", "httpx", "pre-commit"]
+# Everything needed to TRAIN, track and version (not baked into the API image).
+train = [
+    "mlflow==3.17.1",
+    "matplotlib",
+    "optuna",
+    "dvc",
+]
+dev = [
+    "pytest", "pytest-cov", "ruff", "black", "mypy", "httpx", "pre-commit",
+    "mlflow==3.17.1", "matplotlib", "optuna",
+]
 
 # After `pip install -e .` you can type `prodml-train` anywhere.
 [project.scripts]

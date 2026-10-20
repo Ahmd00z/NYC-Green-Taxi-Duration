@@ -12,6 +12,31 @@ from prodml.predict import DurationPredictor
 from prodml.train import train
 
 
+@pytest.fixture(autouse=True)
+def _offline_by_default(monkeypatch):
+    """Module 2: the app now loads models from the MLflow REGISTRY by default.
+
+    Tests must never depend on a running MLflow server (CI has none), so every test
+    starts in "local files" mode. Tests of the registry path opt in explicitly with
+    the `tracking_uri` fixture below.
+    """
+    monkeypatch.setattr(settings, "model_source", "local")
+
+
+@pytest.fixture
+def tracking_uri(tmp_path, monkeypatch) -> str:
+    """A throw-away MLflow (SQLite + tmp artifacts) wired into `settings`."""
+    import mlflow
+
+    uri = f"sqlite:///{tmp_path / 'mlflow.db'}"
+    monkeypatch.setattr(settings, "mlflow_tracking_uri", uri)
+    monkeypatch.setattr(settings, "mlflow_experiment", "test-exp")
+    mlflow.set_tracking_uri(uri)
+    mlflow.create_experiment("test-exp", artifact_location=str(tmp_path / "artifacts"))
+    yield uri
+    mlflow.set_tracking_uri("sqlite:///:memory:")  # let go of the tmp database
+
+
 @pytest.fixture(scope="session")
 def synthetic_csv(tmp_path_factory) -> str:
     """600 fake trips: duration ~ 3 minutes per mile + noise."""

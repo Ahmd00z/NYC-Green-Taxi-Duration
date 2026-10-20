@@ -1,0 +1,56 @@
+# DVC pipeline:  prepare -> featurize -> train -> evaluate
+#
+# Run from the repo root:   dvc repro pipelines/dvc.yaml
+# (`wdir: ..` makes every path below relative to the repo root, not to pipelines/)
+#
+# Needs a reachable MLflow server for the `train` stage:
+#   MLFLOW_TRACKING_URI=http://localhost:5000  (see docker/docker-compose.yml)
+
+stages:
+  prepare:
+    wdir: ..
+    cmd: python -m prodml.pipeline prepare
+    deps:
+      - data/green_tripdata_2019-08.parquet
+      - src/prodml/pipeline.py
+      - src/prodml/data.py
+    params:
+      - data.train_ratio
+    outs:
+      - data/processed
+
+  featurize:
+    wdir: ..
+    cmd: python -m prodml.pipeline featurize
+    deps:
+      - data/processed
+      - src/prodml/features.py
+      - src/prodml/experiments.py
+    outs:
+      - data/features
+
+  train:
+    wdir: ..
+    cmd: python -m prodml.pipeline train
+    deps:
+      - data/features
+      - src/prodml/models.py
+      - src/prodml/tracking.py
+    params:
+      - train.model
+      - xgboost
+      - random_forest
+    outs:
+      - models/candidate
+      - metrics/train_run.json:
+          cache: false
+
+  evaluate:
+    wdir: ..
+    cmd: python -m prodml.pipeline evaluate
+    deps:
+      - data/features/val.parquet
+      - models/candidate
+    metrics:
+      - metrics/scores.json:
+          cache: false

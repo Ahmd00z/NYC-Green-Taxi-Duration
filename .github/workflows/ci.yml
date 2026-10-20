@@ -1,0 +1,92 @@
+name: CI
+
+# Runs on every pull request and on every push to main.
+# lint -> test -> gate -> build.  A red job blocks the next one (and, with branch
+# protection on main, blocks the merge).
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install ruff black
+      - run: ruff check src tests
+      - run: black --check src tests
+
+  test:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e ".[dev]"
+      # The 70% coverage gate lives in pyproject.toml (addopts), so this step fails below 70%.
+      - run: pytest --cov-report=xml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+
+  # MODEL QUALITY GATE. The metrics this PR commits (metrics/scores.json, written by
+  # `dvc repro`) are compared with the ones on main. More than 5% worse MAE -> red.
+  gate:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e .
+      - name: Fetch the baseline metrics from main
+        run: |
+          if git cat-file -e origin/main:metrics/scores.json 2>/dev/null; then
+            git show origin/main:metrics/scores.json > baseline_scores.json
+          else
+            echo "main has no metrics/scores.json yet: first model, nothing to compare"
+          fi
+      - name: Fail on a metric regression
+        run: |
+          if [ -f baseline_scores.json ]; then
+            python -m prodml.gate --candidate metrics/scores.json --baseline-file baseline_scores.json
+          else
+            python -m prodml.gate --candidate metrics/scores.json
+          fi
+
+  build:
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image without pushing
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: false
+          tags: prodml-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
