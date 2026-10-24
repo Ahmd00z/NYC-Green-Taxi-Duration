@@ -27,6 +27,9 @@ from prodml.config import settings
 from prodml.runtimes import make_ort_session
 from prodml.utils import timed
 
+# Rows scored per model call when a whole DataFrame is given (see predict_frame).
+SCORE_SLICE_ROWS = 1000
+
 
 class DurationPredictor:
     def __init__(
@@ -139,7 +142,15 @@ class DurationPredictor:
         """
         if self._pyfunc is not None:
             return np.asarray(self._pyfunc.predict(frame)).ravel()
-        return self._score(frame[["PU_DO", "trip_distance"]].to_dict(orient="records"))
+        records = frame[["PU_DO", "trip_distance"]].to_dict(orient="records")
+        # The vectorizer makes one column per zone pair (~20 000), and the ONNX and
+        # OpenVINO paths turn that into a DENSE array. 100 000 rows would need ~16 GB,
+        # so we score in small slices to keep memory flat.
+        step = SCORE_SLICE_ROWS
+        parts = [
+            self._score(records[i : i + step]) for i in range(0, len(records), step)
+        ]
+        return np.concatenate(parts) if parts else np.empty(0)
 
     @timed
     def predict_one(self, features: dict[str, Any]) -> float:

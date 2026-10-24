@@ -54,7 +54,14 @@ def connect(url: str | None = None):
     """Open a Redis connection. decode_responses=True gives us str instead of bytes."""
     import redis  # imported here so the rest of the package works without redis
 
-    return redis.Redis.from_url(url or settings.redis_url, decode_responses=True)
+    # socket_timeout must be LONGER than the blocking read (block_ms), or an idle
+    # queue looks like a dead connection.
+    return redis.Redis.from_url(
+        url or settings.redis_url,
+        decode_responses=True,
+        socket_timeout=30,
+        socket_connect_timeout=5,
+    )
 
 
 def ensure_group(r) -> None:
@@ -248,6 +255,8 @@ def run_consumer(
       b) events other dead workers left unacked for too long -> XAUTOCLAIM
       c) brand new events                                    -> read with id ">"
     """
+    from redis.exceptions import TimeoutError as RedisTimeout
+
     ensure_group(r)
     totals = {"ok": 0, "dead": 0, "retry": 0}
     last_work = time.time()
@@ -272,13 +281,16 @@ def run_consumer(
         batches.append([(mid, f) for mid, f in claimed[1] if f])
 
         # c) new events. block_ms waits up to that long for something to arrive.
-        fresh = r.xreadgroup(
-            settings.stream_group,
-            name,
-            {settings.stream_in: ">"},
-            count=batch_size,
-            block=block_ms,
-        )
+        try:
+            fresh = r.xreadgroup(
+                settings.stream_group,
+                name,
+                {settings.stream_in: ">"},
+                count=batch_size,
+                block=block_ms,
+            )
+        except RedisTimeout:  # an idle wait that ran too long is not a crash
+            fresh = []
         batches.append(_flatten(fresh))
 
         did_work = False
