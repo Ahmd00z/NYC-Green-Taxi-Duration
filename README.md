@@ -359,3 +359,19 @@ This project demonstrates an end-to-end MLOps workflow: reproducible dependency 
 ## License
 
 No license has been specified yet. Add a `LICENSE` file if you intend to distribute the project under an open-source license.
+---
+
+## Module 3: serving, batch, streaming and release
+
+| Step | What | Files | Run it |
+|---|---|---|---|
+| 1 | Airflow DAGs (weekly training, nightly batch) | `pipelines/dags/`, `src/prodml/orchestration.py` | `docker compose -f docker/docker-compose.serving.yml up -d --build` |
+| 2 | Faster runtimes: ONNX Runtime, OpenVINO | `src/prodml/runtimes.py` | `python -m prodml.runtimes export` then `benchmark` |
+| 3 | BentoML service with adaptive batching | `serving/service.py` | `bentoml serve serving.service:TaxiDuration --port 3000` |
+| 4 | Batch scoring in chunks (idempotent) | `src/prodml/batch.py` | `python -m prodml.batch --input X.parquet --output data/scoring/output --run-date 2026-10-01` |
+| 5 | Load test | `loadtest/locustfile.py` | `TARGET=fastapi locust -f loadtest/locustfile.py --host http://localhost:8000 --headless -u 100 -r 20 -t 2m` |
+| 6 | Streaming with Redis Streams | `stream_producer.py`, `stream_consumer.py` | `python -m prodml.stream_consumer run` + `python -m prodml.stream_producer --rate 200 --duration 30` |
+| 7 | Canary release + rollback + shadow | `deploy/`, `docker/docker-compose.canary.yml`, `src/prodml/canary.py` | `docker compose -f docker/docker-compose.canary.yml up -d --build` |
+
+Install only what you use: `uv sync --extra serving`, `--extra streaming`, `--extra load`,
+`--extra runtimes`. Results and decisions are in `reports/module-3.md`.
