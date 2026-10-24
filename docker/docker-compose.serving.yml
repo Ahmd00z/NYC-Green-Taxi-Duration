@@ -6,8 +6,8 @@
 #
 #   Airflow UI   http://localhost:8081   (user admin; the password is printed in
 #                                         `docker compose ... logs airflow`)
-#   BentoML      http://localhost:3000   (Swagger UI at /)
-#   Redis        localhost:6379
+#   BentoML      http://localhost:3100   (Swagger UI at /)
+#   Redis        localhost:6380   (export REDIS_URL=redis://localhost:6380/0)
 #
 # Backfill a week of batch scoring (idempotent, safe to repeat):
 #   docker compose -f docker/docker-compose.serving.yml exec airflow \
@@ -17,7 +17,7 @@ name: prodml-serving
 services:
   redis:
     image: redis:7-alpine
-    ports: ["6379:6379"]
+    ports: ["6380:6379"]   # 6380 on your machine: 6379 may be taken by another Redis
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -46,6 +46,6 @@ services:
     build:
       context: ..
       dockerfile: docker/bento.Dockerfile
-    ports: ["3000:3000"]
+    ports: ["3100:3000"]   # 3100 on your machine: 3000 is often Grafana
     environment:
       - MODEL_SOURCE=local
