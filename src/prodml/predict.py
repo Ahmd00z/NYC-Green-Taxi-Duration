@@ -24,6 +24,7 @@ import onnxruntime as ort
 
 from prodml import __version__
 from prodml.config import settings
+from prodml.runtimes import make_ort_session
 from prodml.utils import timed
 
 
@@ -40,6 +41,7 @@ class DurationPredictor:
         self._model: Any = None
         self._session: ort.InferenceSession | None = None
         self._pyfunc: Any = None
+        self._openvino: Any = None
         self._artifact_sha256 = ""
 
     # ---------------------------------------------------------------- loading
@@ -94,9 +96,16 @@ class DurationPredictor:
         served = pkl_path
         if self.serving_format == "onnx":
             served = self.models_dir / settings.onnx_name
-            self._session = ort.InferenceSession(
-                str(served), providers=["CPUExecutionProvider"]
-            )
+            # Module 3: ONNX Runtime with every graph optimization turned on.
+            self._session = make_ort_session(served)
+        elif self.serving_format == "openvino":
+            # Module 3: OpenVINO runtime, loaded from the IR made by prodml.runtimes.
+            from prodml.runtimes import OPENVINO_SUBDIR, OPENVINO_XML, OpenVINOSession
+
+            served = self.models_dir / OPENVINO_SUBDIR / OPENVINO_XML
+            self._openvino = OpenVINOSession(served)
+            # The weights file (model.bin) is what really changes, so hash that one.
+            served = served.with_suffix(".bin")
         self._artifact_sha256 = hashlib.sha256(served.read_bytes()).hexdigest()
 
         meta_path = self.models_dir / settings.metadata_name
@@ -114,11 +123,23 @@ class DurationPredictor:
 
             return np.asarray(self._pyfunc.predict(pd.DataFrame(rows))).ravel()
         X = self._dv.transform(rows)
+        if self._openvino is not None:
+            return self._openvino.run(X.toarray().astype(np.float32))
         if self._session is not None:
             X_dense = X.toarray().astype(np.float32)
             name = self._session.get_inputs()[0].name
             return self._session.run(None, {name: X_dense})[0].ravel()
         return self._model.predict(X)
+
+    def predict_frame(self, frame: Any) -> np.ndarray:
+        """Score a DataFrame with columns PU_DO and trip_distance (used by batch jobs).
+
+        With a registry model this skips the slow dict conversion and goes straight
+        into the pyfunc model, which is what makes million-row batches fast.
+        """
+        if self._pyfunc is not None:
+            return np.asarray(self._pyfunc.predict(frame)).ravel()
+        return self._score(frame[["PU_DO", "trip_distance"]].to_dict(orient="records"))
 
     @timed
     def predict_one(self, features: dict[str, Any]) -> float:
