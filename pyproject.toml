@@ -18,6 +18,9 @@ dependencies = [
     "uvicorn",
     "pydantic",
     "pydantic-settings",
+    "scipy",
+    # Module 4: the /metrics endpoint
+    "prometheus-client",
     # Module 2: what the SERVING image needs to load models:/<name>/Production
     "mlflow-skinny==3.17.1",
     # CPU-only wheel on Linux (the Docker image): ~300 MB smaller than the CUDA build
