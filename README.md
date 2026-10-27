@@ -368,6 +368,38 @@ uv run python -m prodml.canary watch  # auto-rollback watcher
 | A/B test | split by user group | low | seconds | measure business impact |
 | Shadow | copy of traffic, answers discarded | none | n/a | test before any user sees it |
 
+## Module 4: monitoring and drift
+
+The model keeps answering `200 OK` long after the world has changed, so we measure it.
+Everything is small on purpose: no Evidently, no Loki, no extra Airflow.
+
+| Technique | File | Question it answers |
+|---|---|---|
+| Live metrics | `src/prodml/monitoring/metrics.py`, `GET /metrics` | How is the service doing right now? |
+| Serving log | `src/prodml/monitoring/serving_log.py` | What was the API actually asked? |
+| Data drift (PSI, KS) | `src/prodml/monitoring/drift.py` | Did the inputs/outputs move away from training? |
+| Concept drift (Page-Hinkley) | `src/prodml/monitoring/concept.py` | Did the *error* start to grow? (needs real durations) |
+| History | `src/prodml/monitoring/store.py` (SQLite) | Drifting for how many days? |
+| Retrain gate | `src/prodml/monitoring/retrain.py` | Should we retrain, and why / why not? |
+| Alerts + dashboard | `monitoring/`, `docker/docker-compose.monitoring.yml` | Who gets told, and where do we look? |
+
+```bash
+export MODEL_SOURCE=local                        # or run MLflow, see Troubleshooting
+uv run python -m prodml.monitoring freeze        # once: freeze 5,000 training rows
+uv run uvicorn prodml.api.main:app --port 8000   # serves /metrics and writes the log
+uv run python -m prodml.monitoring simulate --shift 1.5   # fake drifted traffic (demo)
+uv run python -m prodml.monitoring drift         # PSI/KS table, stored in SQLite
+uv run python -m prodml.monitoring drift --fail-on-drift  # exit 1 = CI turns red
+uv run python -m prodml.monitoring gate          # RETRAIN or HOLD, with reasons
+uv run python -m prodml.monitoring concept --scored data/scoring/<file>.parquet
+docker compose -f docker/docker-compose.monitoring.yml up -d   # Prometheus + Grafana
+```
+
+PSI rule of thumb: below 0.10 stable, 0.10-0.25 watch, above 0.25 drifted. The drift job
+writes its numbers to SQLite and `/metrics` re-exports them as `prodml_drift_psi`, so the
+`FeatureDrift` alert and the Grafana panel need no extra pipeline.
+Runbook: `docs/RUNBOOK.md`. Report: `reports/module-4.md`.
+
 ## Configuration
 
 Environment variables (see `src/prodml/config.py` for all defaults; a `.env` file is read
@@ -383,6 +415,9 @@ too):
 | `PROMOTION_MARGIN` | Fraction by which a candidate must beat Production's MAE to reach Staging |
 | `GATE_MAX_REGRESSION` | CI fails if MAE is worse than the baseline by more than this fraction (default 0.05) |
 | `REDIS_URL` | Redis for streaming (default `redis://localhost:6379/0`) |
+| `SERVING_LOG_PATH` | Where the API appends each scored trip (`""` switches it off) |
+| `REFERENCE_PATH`, `MONITORING_DB` | Frozen reference sample and the SQLite drift/retrain history |
+| `PSI_WARN`, `PSI_DRIFT` | PSI thresholds (default 0.10 and 0.25) |
 | `LOG_LEVEL` | Logging verbosity |
 
 ## Testing and code quality
@@ -477,6 +512,8 @@ The published image: https://hub.docker.com/r/ahmdooz/prodml-api
 - `reports/module-1.md`, `reports/module-2.md`: decisions and evidence for each module.
 - `reports/module-3.md`: inference-pattern decision, load-test tables, batch and streaming
   numbers, release strategy table. **Replace the sample numbers with the ones you measure.**
+
+- `reports/module-4.md`: metric contract, drift tests, alerts, what was and was not tested.
 
 ## License
 
