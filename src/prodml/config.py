@@ -53,5 +53,13 @@ class Settings(BaseSettings):
     stream_min_idle_ms: int = 30_000  # reclaim events a dead worker left unacked
     stream_maxlen: int = 100_000  # approximate cap for every stream
 
+    # --- Module 4: monitoring ---
+    serving_log_path: str = "data/serving_log.jsonl"  # "" switches the log off
+    reference_path: str = "monitoring/reference.parquet"  # frozen training sample
+    monitoring_db: str = "monitoring/monitor.db"  # SQLite: drift + retrain history
+    psi_warn: float = 0.10  # PSI above this: watch it
+    psi_drift: float = 0.25  # PSI above this: it has drifted
+    min_drift_rows: int = 200  # fewer rows than this: do not judge
+
 
 settings = Settings()
