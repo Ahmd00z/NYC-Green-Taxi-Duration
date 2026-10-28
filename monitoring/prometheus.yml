@@ -1,0 +1,15 @@
+# Prometheus: scrape the API every 5 s and load the alert rules.
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: taxi-api
+    metrics_path: /metrics
+    static_configs:
+      # The API runs on your machine (uvicorn ... --port 8000), Prometheus runs in
+      # Docker. host.docker.internal is "your machine" seen from inside the container.
+      - targets: ["host.docker.internal:8000"]

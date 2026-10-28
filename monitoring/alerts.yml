@@ -1,0 +1,62 @@
+# Alert rules. Every rule has `for:` (it must stay true for a while, so one blip does
+# not wake anyone), a severity, and a runbook link (docs/RUNBOOK.md).
+groups:
+  - name: taxi-api
+    rules:
+      - alert: ApiDown
+        expr: up{job="taxi-api"} == 0
+        for: 30s
+        labels: {severity: page}
+        annotations:
+          summary: "The API is not answering Prometheus"
+          runbook: "docs/RUNBOOK.md#api-down"
+
+      - alert: HighErrorRate
+        # 5xx share of all requests over 5 minutes (422 is the CLIENT's mistake, so
+        # it is deliberately not counted here)
+        expr: |
+          sum(rate(prodml_http_requests_total{status=~"5.."}[5m]))
+            / sum(rate(prodml_http_requests_total[5m])) > 0.05
+        for: 2m
+        labels: {severity: page}
+        annotations:
+          summary: "More than 5% of requests fail with 5xx"
+          runbook: "docs/RUNBOOK.md#high-error-rate"
+
+      - alert: HighLatencyP95
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(prodml_http_request_duration_seconds_bucket{route="/predict"}[5m]))
+          ) > 0.5
+        for: 5m
+        labels: {severity: page}
+        annotations:
+          summary: "p95 latency of /predict is above 500 ms"
+          runbook: "docs/RUNBOOK.md#high-latency"
+
+      - alert: NoTraffic
+        expr: sum(rate(prodml_predictions_total[10m])) == 0
+        for: 10m
+        labels: {severity: ticket}
+        annotations:
+          summary: "No predictions for 10 minutes (a silent upstream failure?)"
+          runbook: "docs/RUNBOOK.md#no-traffic"
+
+  - name: taxi-model
+    rules:
+      - alert: FeatureDrift
+        expr: prodml_drift_psi > 0.25
+        for: 1m
+        labels: {severity: ticket}
+        annotations:
+          summary: "PSI above 0.25 for {{ $labels.feature }}"
+          runbook: "docs/RUNBOOK.md#drift-detected"
+
+      - alert: DriftJobStale
+        # the drift job should run at least daily; 0 means it never ran
+        expr: time() - prodml_drift_last_run_timestamp_seconds > 2 * 24 * 3600
+        for: 10m
+        labels: {severity: ticket}
+        annotations:
+          summary: "The drift job has not run for 2 days"
+          runbook: "docs/RUNBOOK.md#drift-job-stale"

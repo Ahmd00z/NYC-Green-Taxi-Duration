@@ -8,7 +8,8 @@ from typing import Any, AsyncIterator
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+from pydantic import ValidationError
 
 from prodml.api.schemas import (
     BatchPredictionRequest,
@@ -18,6 +19,7 @@ from prodml.api.schemas import (
 )
 from prodml.features import build_features
 from prodml.logging_conf import correlation_id_var, setup_logging
+from prodml.monitoring import metrics, serving_log
 from prodml.predict import DurationPredictor
 
 setup_logging()
@@ -35,8 +37,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         app.state.predictor = DurationPredictor().load()
         logger.info("model loaded", extra={"version": app.state.predictor.version})
+        metrics.set_model_info(app.state.predictor.version)
     except Exception:
         logger.exception("model load failure")  # ERROR + traceback in the log
+    metrics.register_drift_collector()  # drift numbers appear on /metrics too
     yield
     app.state.predictor = None
 
@@ -61,6 +65,7 @@ async def correlation_middleware(request: Request, call_next: Any) -> Any:
     request_id = str(uuid.uuid4())
     token = correlation_id_var.set(request_id)
     start = time.perf_counter()
+    metrics.INFLIGHT.inc()
     logger.info(
         "request received", extra={"method": request.method, "path": request.url.path}
     )
@@ -71,6 +76,11 @@ async def correlation_middleware(request: Request, call_next: Any) -> Any:
         response = JSONResponse(
             status_code=500, content={"detail": "Internal server error"}
         )
+    metrics.INFLIGHT.dec()
+    # route TEMPLATE ("/predict"), never the raw URL: bounded label values
+    route = getattr(request.scope.get("route"), "path", "unmatched")
+    metrics.HTTP_REQUESTS.labels(route, str(response.status_code)).inc()
+    metrics.HTTP_LATENCY.labels(route).observe(time.perf_counter() - start)
     response.headers["X-Request-ID"] = request_id
     logger.info(
         "request completed",
@@ -94,11 +104,31 @@ async def validation_handler(request: Request, exc: RequestValidationError) -> A
     return JSONResponse(status_code=422, content={"detail": errors})
 
 
+def _observe(version: str, trips: list, predictions: list[float]) -> None:
+    """Update the live metrics and append to the serving log (never raises)."""
+    metrics.record_predictions(version, predictions, [t.trip_distance for t in trips])
+    serving_log.append(
+        {
+            "PULocationID": t.PULocationID,
+            "DOLocationID": t.DOLocationID,
+            "trip_distance": t.trip_distance,
+            "prediction": p,
+        }
+        for t, p in zip(trips, predictions)
+    )
+
+
 # ---------------------------------------------------------------- endpoints
 @app.get("/health")
 def health(predictor: DurationPredictor = Depends(get_predictor)) -> dict:
     """200 only if the model is really in memory (not just 'process is alive')."""
     return {"status": "healthy", "model_loaded": True}
+
+
+@app.get("/metrics", include_in_schema=False)
+def prometheus_metrics() -> Response:
+    """Scraped by Prometheus every few seconds."""
+    return Response(metrics.render(), media_type="text/plain; version=0.0.4")
 
 
 @app.get("/metadata")
@@ -127,6 +157,7 @@ def predict(
         "prediction served",
         extra={"prediction": prediction, "latency_ms": round(latency_ms, 3)},
     )
+    _observe(predictor.version, [req], [prediction])
     return PredictionResponse(
         prediction=prediction,
         model_version=predictor.version,
@@ -153,9 +184,58 @@ def predict_batch(
         "batch prediction served",
         extra={"batch_size": len(rows), "latency_ms": round(latency_ms, 3)},
     )
+    _observe(predictor.version, req.inputs, predictions)
     return BatchPredictionResponse(
         predictions=predictions,
         model_version=predictor.version,
         correlation_id=correlation_id_var.get(),
         latency_ms=round(latency_ms, 3),
     )
+
+
+@app.post("/predict/batch/partial")
+def predict_batch_partial(
+    payload: dict[str, Any],
+    predictor: DurationPredictor = Depends(get_predictor),
+) -> dict[str, Any]:
+    """Like /predict/batch, but one bad row does not reject the whole request.
+
+    Every row is checked on its own. Good rows get a prediction; bad rows get an
+    error message. The answer is always 200, and `results` keeps the input order.
+    """
+    items = payload.get("inputs")
+    if not isinstance(items, list) or not 1 <= len(items) <= 1000:
+        raise HTTPException(status_code=422, detail="inputs must be a list of 1-1000")
+
+    results: list[dict[str, Any]] = [{} for _ in items]
+    good_index: list[int] = []
+    good_rows: list[dict[str, Any]] = []
+    for i, item in enumerate(items):
+        try:
+            trip = PredictionRequest.model_validate(item)  # same rules as /predict
+        except ValidationError as error:
+            first = error.errors()[0]
+            field = ".".join(str(p) for p in first["loc"])
+            results[i] = {"index": i, "error": f"{field}: {first['msg']}"}
+            continue
+        good_index.append(i)
+        good_rows.append(
+            build_features(trip.PULocationID, trip.DOLocationID, trip.trip_distance)
+        )
+
+    if good_rows:  # ONE model call for all the valid rows
+        for i, value in zip(good_index, predictor.predict_batch(good_rows)):
+            results[i] = {"index": i, "prediction": value}
+        _observe(
+            predictor.version,
+            [PredictionRequest.model_validate(items[i]) for i in good_index],
+            [results[i]["prediction"] for i in good_index],
+        )
+
+    return {
+        "results": results,
+        "ok": len(good_rows),
+        "failed": len(items) - len(good_rows),
+        "model_version": predictor.version,
+        "correlation_id": correlation_id_var.get(),
+    }

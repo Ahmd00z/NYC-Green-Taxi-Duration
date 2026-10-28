@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     metadata_name: str = "metadata.json"
 
     # --- serving ---
-    serving_format: Literal["onnx", "pickle"] = (
+    serving_format: Literal["onnx", "pickle", "openvino"] = (
         "onnx"  # only used by model_source=local
     )
     log_level: str = "INFO"
@@ -42,6 +42,24 @@ class Settings(BaseSettings):
     promote_metric: str = "mae"  # lower is better
     promotion_margin: float = 0.0  # candidate must beat Production by this fraction
     gate_max_regression: float = 0.05  # CI fails if MAE is >5% worse than baseline
+
+    # --- Module 3: streaming (Redis Streams) ---
+    redis_url: str = "redis://localhost:6379/0"
+    stream_in: str = "trips:in"  # raw trip events
+    stream_out: str = "predictions:out"  # predictions
+    stream_dead: str = "trips:dead"  # dead-letter: poison / repeatedly failing events
+    stream_group: str = "scorers"  # consumer group shared by all workers
+    stream_max_deliveries: int = 3  # after this many tries an event is dead-lettered
+    stream_min_idle_ms: int = 30_000  # reclaim events a dead worker left unacked
+    stream_maxlen: int = 100_000  # approximate cap for every stream
+
+    # --- Module 4: monitoring ---
+    serving_log_path: str = "data/serving_log.jsonl"  # "" switches the log off
+    reference_path: str = "monitoring/reference.parquet"  # frozen training sample
+    monitoring_db: str = "monitoring/monitor.db"  # SQLite: drift + retrain history
+    psi_warn: float = 0.10  # PSI above this: watch it
+    psi_drift: float = 0.25  # PSI above this: it has drifted
+    min_drift_rows: int = 200  # fewer rows than this: do not judge
 
 
 settings = Settings()

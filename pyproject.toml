@@ -18,6 +18,9 @@ dependencies = [
     "uvicorn",
     "pydantic",
     "pydantic-settings",
+    "scipy",
+    # Module 4: the /metrics endpoint
+    "prometheus-client",
     # Module 2: what the SERVING image needs to load models:/<name>/Production
     "mlflow-skinny==3.17.1",
     # CPU-only wheel on Linux (the Docker image): ~300 MB smaller than the CUDA build
@@ -34,9 +37,15 @@ train = [
     "optuna",
     "dvc",
 ]
+# Mini Project 3 (each extra is only installed where it is needed).
+serving = ["bentoml>=1.4,<1.5", "onnxruntime", "pandas", "pyarrow", "scikit-learn"]
+runtimes = ["onnxruntime", "openvino", "onnx", "skl2onnx"]
+streaming = ["redis>=5"]
+load = ["locust"]
 dev = [
     "pytest", "pytest-cov", "ruff", "black", "mypy", "httpx", "pre-commit",
     "mlflow==3.17.1", "matplotlib", "optuna",
+    "redis>=5", "fakeredis", "onnxruntime", "openvino", "onnx", "pyarrow",
 ]
 
 # After `pip install -e .` you can type `prodml-train` anywhere.

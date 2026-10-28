@@ -44,3 +44,8 @@ dist/
 
 # Local MLflow artifacts
 mlartifacts/
+demos/_out/
+
+# Module 4: monitoring history (generated)
+monitoring/monitor.db
+monitoring/reference.parquet.tmp

@@ -23,6 +23,14 @@ def _offline_by_default(monkeypatch):
     monkeypatch.setattr(settings, "model_source", "local")
 
 
+@pytest.fixture(autouse=True)
+def _monitoring_in_tmp(tmp_path, monkeypatch):
+    """Module 4: serving log, reference and history go to a temp folder per test."""
+    monkeypatch.setattr(settings, "serving_log_path", str(tmp_path / "serving.jsonl"))
+    monkeypatch.setattr(settings, "reference_path", str(tmp_path / "reference.parquet"))
+    monkeypatch.setattr(settings, "monitoring_db", str(tmp_path / "monitor.db"))
+
+
 @pytest.fixture
 def tracking_uri(tmp_path, monkeypatch) -> str:
     """A throw-away MLflow (SQLite + tmp artifacts) wired into `settings`."""

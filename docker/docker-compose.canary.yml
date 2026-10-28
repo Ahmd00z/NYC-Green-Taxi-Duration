@@ -1,0 +1,41 @@
+# Mini Project 3, step 7: canary stack = two model containers + nginx in front.
+#
+# Run from the REPO ROOT:
+#   docker compose -f docker/docker-compose.canary.yml up -d --build
+#   curl -s -X POST localhost:8080/predict -H 'content-type: application/json' \
+#        -d '{"trips": [[43, 236, 2.5]]}' -i | grep -i x-deployment
+#
+# model-v2 can be made deliberately slow (FAKE_DELAY_MS) to practise the auto-rollback:
+#   FAKE_DELAY_MS=600 docker compose -f docker/docker-compose.canary.yml up -d model-v2
+#   python -m prodml.canary watch
+name: prodml-canary
+
+x-model: &model
+  build:
+    context: ..
+    dockerfile: docker/bento.Dockerfile
+  environment:
+    - MODEL_SOURCE=local
+
+services:
+  model-v1:
+    <<: *model
+    environment:
+      - MODEL_SOURCE=local
+      - RELEASE_LABEL=stable
+  model-v2:
+    <<: *model
+    environment:
+      - MODEL_SOURCE=local
+      - RELEASE_LABEL=canary
+      - FAKE_DELAY_MS=${FAKE_DELAY_MS:-0}
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on: [model-v1, model-v2]
+    ports:
+      - "8080:80"
+    volumes:
+      # The file is mounted from the host so promote/rollback scripts can edit it.
+      - ../deploy/nginx/${NGINX_CONF:-nginx.conf}:/etc/nginx/nginx.conf:ro
+      - ../deploy/nginx/logs:/var/log/nginx
