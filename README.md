@@ -517,5 +517,4 @@ The published image: https://hub.docker.com/r/ahmdooz/prodml-api
 
 ## License
 
-No license has been specified yet. Add a `LICENSE` file if you intend to distribute the
-project under an open-source license.
+No license has been specified yet. Add a `LICENSE` file if you intend to distribute the project under an open-source license.

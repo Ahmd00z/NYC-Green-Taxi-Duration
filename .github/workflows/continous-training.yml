@@ -7,8 +7,8 @@ name: Continuous Training
 # "production" GitHub Environment (Settings -> Environments -> production -> Required reviewers).
 on:
   # 1) weekly cron
-  schedule:
-    - cron: "0 3 * * 1" # Mondays 03:00 UTC
+  # schedule:
+  # - cron: "0 3 * * 1" # Mondays 03:00 UTC
   # 2) manual run, with a data-version input
   workflow_dispatch:
     inputs:
